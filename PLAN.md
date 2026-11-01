@@ -1,3 +1,5 @@
+> **Note.** This is the plan written before the work started. The report in `report/report.pdf` describes what was actually done. Main differences: the language model runs in bf16 (not 4-bit); the learning-rate sweep extends to 1e-5; a random forest, a neural network, a household-clustered bootstrap of the logit and an ablation were added; the few-shot run was dropped.
+
 # Modelling Commuter Mode Choice in London: Discrete Choice Models, Gradient Boosting and a Fine-Tuned Small Language Model
 
 Project plan, from data to report. Hardware target: MacBook Pro M1, 8 GB RAM.
