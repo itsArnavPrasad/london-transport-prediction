@@ -1,0 +1,13 @@
+\begin{tabular}{lccrr}
+\toprule
+Model & Log-loss [95\% CI] & Accuracy (\%) [95\% CI] & Macro-F1 & GMPCA \\
+\midrule
+Market shares (reference) & 1.151 [1.139, 1.164] & 42.8 [41.6, 44.1] & 0.150 & 0.316 \\
+\midrule
+Multinomial Logit & 0.684 [0.664, 0.700] & 73.8 [72.9, 74.7] & 0.549 & 0.505 \\
+Nested Logit & 0.683 [0.664, 0.700] & 73.8 [73.0, 74.8] & 0.550 & 0.505 \\
+Gradient boosting & 0.657 [0.639, 0.674] & 74.6 [73.9, 75.5] & 0.555 & 0.518 \\
+Random forest & 0.676 [0.658, 0.692] & 74.2 [73.5, 75.1] & 0.550 & 0.509 \\
+Neural net (MLP) & 0.657 [0.638, 0.674] & 74.6 [73.8, 75.5] & 0.553 & 0.518 \\
+\bottomrule
+\end{tabular}

@@ -1,0 +1,13 @@
+\begin{tabular}{lrrrr}
+\toprule
+Model & Walk & Cycle & Public transport & Car \\
+\midrule
+Multinomial Logit & 0.629 & 0.008 & 0.728 & 0.829 \\
+Nested Logit & 0.632 & 0.008 & 0.729 & 0.831 \\
+Gradient boosting & 0.615 & 0.000 & 0.765 & 0.820 \\
+Random forest & 0.620 & 0.000 & 0.767 & 0.810 \\
+Neural net (MLP) & 0.632 & 0.000 & 0.784 & 0.820 \\
+Qwen 0.5B zero-shot & 0.326 & 0.000 & 0.000 & 0.792 \\
+Qwen 0.5B fine-tuned (8,000 trips) & 0.614 & 0.000 & 0.657 & 0.830 \\
+\bottomrule
+\end{tabular}

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from common import load_split, RES, MODES
 
 FIG = RES / "figures"; FIG.mkdir(exist_ok=True)
-plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True, "grid.alpha": .25, "figure.dpi": 130})
+plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False, "axes.grid": True, "grid.alpha": .25, "figure.dpi": 130, "savefig.dpi": 220})
 C = {"Multinomial Logit": "#1f77b4", "Nested Logit": "#17becf", "Gradient boosting": "#2ca02c", "Random forest": "#8c564b", "Neural net (MLP)": "#9467bd",
      "Qwen 0.5B zero-shot": "#d62728", "Qwen 0.5B fine-tuned": "#ff7f0e", "MNL M2": "#aec7e8", "MNL M4": "#1f77b4", "Qwen 0.5B zero-shot (prior-corrected)": "#ff9896", "Qwen 0.5B LoRA fine-tuned (8,000 trips)": "#ff7f0e"}
 LAB = ["walk", "cycle", "public transport", "drive"]
@@ -56,34 +56,37 @@ def f4_reliability():
 def f5_confusion():
     conf, names = np.load(RES / "tables/confusion.npy"), pd.read_csv(RES / "tables/confusion_models.csv").iloc[:, 0].tolist()
     show = [n for n in ["mnl", "gbm", "qwen_zeroshot", "qwen_ft_n8000"] if n in names]
-    T = {"mnl": "Multinomial Logit", "gbm": "Gradient boosting", "qwen_zeroshot": "Qwen zero-shot", "qwen_ft_n8000": "Qwen fine-tuned"}
-    fig, ax = plt.subplots(1, len(show), figsize=(3.3 * len(show), 3.3))
-    for a, n in zip(np.atleast_1d(ax), show):
+    T = {"mnl": "Multinomial Logit", "gbm": "Gradient boosting", "qwen_zeroshot": "Qwen zero-shot", "qwen_ft_n8000": "Qwen fine-tuned (8,000 trips)"}
+    fig, axs = plt.subplots(2, 2, figsize=(7.2, 6.6)); axs = axs.ravel()
+    for a, n in zip(axs, show):
         c = conf[names.index(n)]; r = c / c.sum(1, keepdims=True); a.imshow(r, cmap="Blues", vmin=0, vmax=1)
         for i in range(4):
-            for j in range(4): a.text(j, i, f"{r[i, j]:.2f}", ha="center", va="center", color="white" if r[i, j] > .5 else "black", fontsize=8)
-        a.set_xticks(range(4)); a.set_xticklabels(["walk", "cyc", "PT", "drive"]); a.set_yticks(range(4)); a.set_yticklabels(["walk", "cyc", "PT", "drive"]); a.set_title(T[n], fontsize=9); a.grid(False); a.set_xlabel("predicted")
-    np.atleast_1d(ax)[0].set_ylabel("actual (row-normalised)"); save("f5_confusion")
+            for j in range(4): a.text(j, i, f"{r[i, j]:.2f}", ha="center", va="center", color="white" if r[i, j] > .5 else "black", fontsize=9)
+        a.set_xticks(range(4)); a.set_xticklabels(["walk", "cycle", "PT", "car"]); a.set_yticks(range(4)); a.set_yticklabels(["walk", "cycle", "PT", "car"]); a.set_title(T[n], fontsize=10); a.grid(False)
+        a.set_xlabel("predicted"); a.set_ylabel("actual (row-normalised)")
+    save("f5_confusion")
 
 def f6_vot():
-    t = tab("mnl_vot"); a = t[t.segment == "all training trips"].set_index("component")
+    a = tab("mnl_bootstrap_vot").set_index("component")  # household-clustered bootstrap intervals
     fig, ax = plt.subplots(1, 2, figsize=(11, 3.8), gridspec_kw={"width_ratios": [1.2, 1]})
-    y = np.arange(len(a))[::-1]; ax[0].barh(y, a.vot_gbp_per_hour, xerr=[a.vot_gbp_per_hour - a.lo, a.hi - a.vot_gbp_per_hour], capsize=2, color="#1f77b4")
-    ax[0].set_yticks(y); ax[0].set_yticklabels(a.index); ax[0].set_xlabel("value of time (GBP/hour), MNL, 95% CI")
+    y = np.arange(len(a))[::-1]; ax[0].barh(y, a.vot_gbp_per_hour, xerr=[a.vot_gbp_per_hour - a.boot_lo, a.boot_hi - a.vot_gbp_per_hour], capsize=2, color="#1f77b4")
+    ax[0].set_yticks(y); ax[0].set_yticklabels(a.index); ax[0].set_xlabel("value of time (GBP/hour), MNL, 95% household-bootstrap CI")
     i = tab("implied_vot"); i = i.assign(lab=i.model + " / " + i["mode"])
     y = np.arange(len(i))[::-1]; ax[1].barh(y, i.median_gbp_per_hour, xerr=[(i.median_gbp_per_hour - i.q25).clip(lower=0), (i.q75 - i.median_gbp_per_hour).clip(lower=0)], capsize=2, color="#7f7f7f")
     ax[1].set_yticks(y); ax[1].set_yticklabels(i.lab, fontsize=7); ax[1].set_xlabel("implied value of time, median and IQR"); save("f6_value_of_time")
 
 def f7_scenarios():
     t = tab("scenario_shifts"); t = t[(t["sample"] == "subset")]; sc = t.scenario.unique(); models = t.model.unique()
-    fig, ax = plt.subplots(1, len(sc), figsize=(3 * len(sc), 3.4), sharey=True)
-    for a, s in zip(np.atleast_1d(ax), sc):
+    fig, axs = plt.subplots(2, 3, figsize=(11, 6.2), sharey=True); axs = axs.ravel()
+    for a, s in zip(axs, sc):
         g = t[t.scenario == s]
         for j, m in enumerate(models):
             h = g[g.model == m].set_index("mode").loc[MODES]; x = np.arange(4) + (j - (len(models) - 1) / 2) * .8 / len(models)
             a.bar(x, h.shift_pp, width=.8 / len(models), yerr=[h.shift_pp - h.lo, h.hi - h.shift_pp], capsize=1, label=m, color=C.get(m, None))
-        a.set_xticks(range(4)); a.set_xticklabels(["walk", "cyc", "PT", "drive"]); a.set_title(s, fontsize=8); a.axhline(0, color="k", lw=.6)
-    np.atleast_1d(ax)[0].set_ylabel("mode-share shift (pp)"); np.atleast_1d(ax)[0].legend(fontsize=6); save("f7_policy_scenarios")
+        a.set_xticks(range(4)); a.set_xticklabels(["walk", "cycle", "PT", "car"]); a.set_title(s, fontsize=9); a.axhline(0, color="k", lw=.6)
+    for a in axs[[0, 3]]: a.set_ylabel("mode-share shift (pp)")
+    h_, l_ = axs[0].get_legend_handles_labels(); axs[5].axis("off"); axs[5].legend(h_, l_, loc="center", fontsize=9, frameon=False)
+    save("f7_policy_scenarios")
 
 def f8_group_importance():
     m, g = tab("mnl_group_importance"), tab("gbm_group_importance")

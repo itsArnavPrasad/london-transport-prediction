@@ -13,7 +13,7 @@ def embed(html, base):
         return f'src="data:image/png;base64,{base64.b64encode(p.read_bytes()).decode()}"'
     return re.sub(r'src="([^"]+\.png)"', f, html)
 
-for name in ("REPORT", "TEAM_GUIDE"):
+for name in ("TEAM_GUIDE",):
     src = ROOT / f"report/{name}.md"
     body = markdown.markdown(src.read_text(), extensions=["tables", "fenced_code"])
     html = f"<!doctype html><html><head><meta charset='utf-8'><title>{name}</title><style>{CSS}</style></head><body>{embed(body, src.parent)}</body></html>"

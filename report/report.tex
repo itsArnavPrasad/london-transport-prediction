@@ -1,0 +1,582 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{booktabs,longtable,array,tabularx}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{setspace}
+\usepackage{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+
+\setstretch{1.08}
+\setlength{\parskip}{0.45em}
+\setlength{\parindent}{0pt}
+\captionsetup{font=small,labelfont=bf,skip=6pt}
+\titleformat{\section}{\large\bfseries}{\thesection}{0.7em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.7em}{}
+\setlist{itemsep=0.15em,topsep=0.3em}
+\pagestyle{fancy}\fancyhf{}\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[C]{\small\thepage}
+\bibliographystyle{plainnat}
+\setcitestyle{authoryear,round}
+\newcommand{\pp}{\,pp}
+\newcommand{\gbp}{\pounds}
+\newcommand{\figpath}{../results/figures/}
+\newcommand{\tabpath}{tables/}
+\IfFileExists{\tabpath numbers.tex}{\input{\tabpath numbers.tex}}{}
+
+\begin{document}
+
+% ------------------------------------------------------------------ title
+\begin{center}
+{\LARGE\bfseries Modelling Commuter Mode Choice in London:\\[0.3em]
+Discrete Choice Models, Machine Learning and a\\[0.3em]
+Fine-Tuned Small Language Model}\\[1.4em]
+{\large
+Arnav Prasad (24B0625)\\
+Aditya Chaurasiya (24B0622)\\
+Bhavik Katariya (24B0623)\\
+Sumit Yadav (24B0643)\\
+Vedant Patel (24B0661)\\
+Ritesh Srivastava (24B0613)}\\[0.8em]
+Indian Institute of Technology Bombay\\[0.4em]
+November 2026
+\end{center}
+\vspace{0.6em}
+
+\begin{abstract}
+\noindent
+We model the choice among walking, cycling, public transport and car using 81,086 trips from the London Passenger Mode Choice (LPMC) dataset, as an open substitute for the multi-mode dataset described in the course brief. Models are estimated on the first two survey years and tested on the third, with all tuning grouped by household to prevent leakage. A Multinomial Logit with 67 parameters reaches 73.8\% accuracy (log-loss 0.684) on the full test set; a Nested Logit that separates the car from the other modes fits better but predicts no better. Gradient boosting and a neural network are slightly more accurate (74.6\%, log-loss 0.657) and match published benchmarks, but their responses to price and time changes are unreliable: for example, gradient boosting predicts no fall in car use when driving costs rise. A 0.5-billion-parameter language model cannot predict mode choice zero-shot (39\% accuracy); after LoRA fine-tuning on 8,000 trips it reaches 70\% accuracy (log-loss 0.77), still behind every classical model. Car availability and personal characteristics dominate mode choice. Time attributes carry more weight than cost attributes in our estimates, but the cost effects, and fares in particular, are weakly identified in this dataset, so conclusions about pricing are tentative. Under the logit model, a 15\% increase in driving time moves about 1.8 percentage points of trips away from the car, mostly to public transport.
+\end{abstract}
+
+\vspace{0.4em}
+\noindent\textbf{Summary of findings.}
+\begin{enumerate}
+\item A well-specified Multinomial Logit predicts nearly as well as the best machine-learning models (73.8\% against 74.6\% accuracy on the full test set) and is the only model family whose responses to policy changes are always in the expected direction.
+\item Personal characteristics, above all car availability, explain most of the variation in mode choice; among service attributes, walking and cycling times matter least in the logit model, while public transport service ranks last in the boosting model.
+\item Nested Logit supports treating the car as a distinct alternative (nest parameter 1.31), but does not improve out-of-sample prediction.
+\item Gradient boosting and a neural network improve log-loss by 0.025 to 0.029 over the logit model, but respond to counterfactual changes in a behaviourally inconsistent way for a large share of trips.
+\item A 0.5-billion-parameter language model fails zero-shot, learns substantially from 8,000 examples, and remains the weakest trained model, with worse calibration and unreliable policy responses.
+\item The effect of public transport fares cannot be separated from distance in this data; the fare-based scenarios rest on an assumption that is stated explicitly.
+\end{enumerate}
+
+\tableofcontents
+\newpage
+
+% ------------------------------------------------------------------ 1
+\section{Introduction}
+
+Individual travel mode choices vary with socio-demographic characteristics, trip attributes and the service characteristics of the available modes. Understanding these variations supports urban transport planning and policy. This project models the choice among walking, cycling, public transport and car for urban trips, and asks which factors drive the choice, how well different model families predict it, what travellers value, and how mode shares respond to changes in cost and travel time.
+
+\paragraph{Relation to the course brief.}
+The brief describes an individual-level dataset with income, age, gender, education, occupation, trip distance, trip purpose, dwelling type, parking availability, public transport satisfaction, mode-specific travel times and costs, and mode availability, and asks for discrete choice models such as the Multinomial Logit to explain the choice among walking, two-wheelers, auto-rickshaws, cars, buses and local trains. We did not have access to such a dataset, and no public dataset with that combination of variables exists for an Indian city. We therefore used the London Passenger Mode Choice (LPMC) dataset, the closest open alternative: it contains real, individual-level revealed-preference choices together with mode-specific times and costs. The methods transfer directly. The differences are the city, the mode set (four modes instead of six), and the personal variables available (age, gender, licence, car ownership and fare type instead of income, education, occupation, dwelling and parking). Table~\ref{tab:brief} maps each requirement of the brief to the part of this report that addresses it.
+
+\begin{table}[H]
+\centering\small
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{2.6cm}}
+\toprule
+Requirement of the brief & How it is addressed & Section \\
+\midrule
+Identify the factors associated with mode selection & Coefficients of the Multinomial and Nested Logit; importance of variable groups & \ref{sec:dcm} \\
+Estimate choice probabilities & Every model outputs four probabilities per trip; evaluated on a later survey year & \ref{sec:pred} \\
+Compare model performance & Six model families compared with log-loss, accuracy, calibration, mode-share error and confidence intervals & \ref{sec:pred} \\
+Assess the importance of individual, trip, residential and service attributes & Drop-one-group likelihood tests and permutation importance; residential variables are not available & \ref{sec:dcm} \\
+Insights for sustainable urban transport planning & Value of time, elasticities, policy scenarios, implications & \ref{sec:behaviour}, \ref{sec:discussion} \\
+\bottomrule
+\end{tabularx}
+\caption{Requirements of the brief and where they are addressed.}
+\label{tab:brief}
+\end{table}
+
+\paragraph{Contributions beyond the brief.}
+We compare the logit models with gradient boosting, a random forest and a neural network, and with a small language model used zero-shot and after fine-tuning, which allows us to ask how much data a language model needs to learn mode choice and whether its behaviour is consistent with economic theory. Every comparison uses the same train and test design, the same metrics and household-level bootstrap intervals.
+
+% ------------------------------------------------------------------ 2
+\section{Data}
+\label{sec:data}
+
+\subsection{Source and construction}
+LPMC \citep{hillel2018} is built from the London Travel Demand Survey (LTDS), a rolling household travel survey run by Transport for London (TfL), using trip diaries from April 2012 to March 2015. The dataset's authors removed trips outside London and trips that did not use TfL services, leaving 81,086 trips made by 31,954 people in 17,616 households. A trip diary records only the mode that was used. To obtain the alternatives, the authors passed each trip through an online journey planner, which produced a route and travel time for each of the four modes, and then applied a cost model to compute individual-specific public transport fares, fuel costs and congestion charges. The attributes of every mode, including the chosen one, are therefore modelled and not observed. Expansion factors exist in the original survey but are not distributed with the dataset, so all results describe the sample and not the population of London.
+
+\subsection{Variables}
+The chosen mode is coded walk, cycle, public transport, car. Personal variables are age, gender, driving licence, household car ownership (no car, fewer than one car per adult, at least one car per adult), fare type (full fare, age 16 and over, child, disabled, free pass) and bus fare scale (free, half price, full price). Trip variables are purpose (home-based work, home-based education, home-based other, employer's business, non-home-based other), straight-line distance, start time and day of week. Mode attributes are travel time for walking and cycling; access, rail, bus and interchange time, the number of interchanges and the fare for public transport; and driving time, fuel cost, congestion charge and traffic variability for the car. We convert times from hours to minutes. Total public transport time is the sum of its four components and total driving cost is fuel plus congestion charge, as the documentation prescribes.
+
+\subsection{Data quality and features that matter for interpretation}
+We verified the file against the documentation. There are no missing values, no duplicate rows or trip identifiers, and the numbers of trips, people and households match the documentation. Driving time and public transport time are never zero, so all four alternatives exist for every trip. No row was removed or altered. Four features of the data matter for interpretation.
+\begin{itemize}
+\item \textbf{The car mode includes passengers.} Of the 35,808 car trips, 8,322 (23\%) are made by people without a driving licence and 5,053 by people aged under 17. We therefore treat all four modes as available for every trip, as in the source paper, and call the mode ``car (driver or passenger)''.
+\item \textbf{Cycling is rare}, at 3.0\% of trips.
+\item \textbf{A third of public transport fares are zero} (32.7\%), mostly because of free passes, and among the remaining trips the fare is strongly related to distance (correlation 0.74).
+\item \textbf{Households are disjoint across survey years}: no household or person appears in more than one year.
+\end{itemize}
+Overall mode shares are 17.6\% walk, 3.0\% cycle, 35.3\% public transport and 44.2\% car. Shares are stable across survey years (car 44.0\%, 45.6\% and 42.8\%), so the test year is a fair but not trivial forecasting setting. Figure~\ref{fig:dist} shows how strongly mode depends on distance.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{\figpath f1_mode_share_by_distance.png}
+\caption{Mode share by straight-line distance (all 81,086 trips). Walking dominates below 1 km, public transport and car dominate beyond 2 km, and cycling remains small throughout.}
+\label{fig:dist}
+\end{figure}
+
+% ------------------------------------------------------------------ 3
+\section{Methodology}
+\label{sec:method}
+
+\subsection{Training, validation and test design}
+\label{sec:split}
+The test set is survey year 3 (April 2014 to March 2015), with 26,320 trips. The training pool is survey years 1 and 2, with 54,766 trips. Training on the past and testing on a later year mirrors the intended use of choice models, which are estimated on earlier surveys to forecast later conditions. Because no household appears in both periods, the test set cannot benefit from other trips of the same people, which would otherwise inflate scores. This is the design recommended by the review of \citet{hillel2021}, who identify leakage between trips of the same traveller as a common pitfall in the mode choice literature. All tuning used five folds of the training years grouped by household, and the test set was not used to choose any model, specification or setting.
+
+For the language model, a fixed 1,000-trip validation set was drawn from one fold, and the fine-tuning trips were drawn only from the other four folds, so validation and training households are disjoint. Running a language model over 26,320 test trips several times is too slow on a laptop with 8~GB of memory. Every model is therefore also scored on a fixed random sample of 4,000 test trips, drawn before any modelling. The classical models are scored on both the full test set and the sample, which shows that the sample is representative. Confidence intervals are 95\% percentile intervals from a household-level bootstrap with 1,000 resamples; comparisons between models are paired on the same resamples.
+
+\subsection{Multinomial Logit}
+\label{sec:mnl}
+The utility of mode $j$ for trip $n$ is a linear function of the mode's attributes and the traveller's characteristics, plus an alternative-specific constant, with walking as the reference alternative:
+\begin{equation}
+U_{nj} = V_{nj} + \varepsilon_{nj}, \qquad P_{n}(j) = \frac{\exp(V_{nj})}{\sum_{k}\exp(V_{nk})}.
+\end{equation}
+Models were estimated by maximum likelihood with Biogeme 3.3.5 \citep{bierlaire2023}. We built the specification in five steps: M0 (constants only), M1 (common time and cost coefficients), M2 (mode-specific time coefficients, with public transport time split into access, rail, bus and interchange time plus a penalty per interchange, and traffic variability), M3 (adding person variables) and M4 (adding trip variables). Each step was tested with a likelihood-ratio test, and the specification with the lowest Bayesian information criterion (BIC) was selected. Time, interchange and cost coefficients are required, and checked, to be negative.
+
+Standard errors from a single maximum-likelihood fit treat all trips as independent, although trips of the same person and household are correlated. We therefore also resampled whole households with replacement \bootN{} times from the training years, refitted the selected specification on each resample, and used the distribution of the refitted coefficients for standard errors and for the confidence intervals of the value of time (Section~\ref{sec:dcm}).
+
+\subsection{Nested Logit}
+Nested Logit relaxes the independence from irrelevant alternatives property of the Multinomial Logit by correlating the random terms of alternatives in the same nest through a nest parameter $\mu \ge 1$; $\mu = 1$ recovers the Multinomial Logit. Two structures were estimated on the selected specification: $\{$walk, cycle$\}$ against $\{$public transport, car$\}$, and $\{$walk, cycle, public transport$\}$ against $\{$car$\}$. Nest parameters were tested against 1.
+
+\subsection{Machine learning models}
+Gradient boosting (the histogram implementation in scikit-learn) was tuned over 10 random settings with household-grouped folds, with the number of trees chosen by validation log-loss. A random forest and a small neural network (a multilayer perceptron with standardised inputs and one-hot encoding of purpose and fare type, averaged over five random starts) were tuned lightly on one training fold. All use the same trip information as the logit models and the same metrics and bootstrap.
+
+\subsection{Language model}
+We used Qwen2.5-0.5B-Instruct, run locally with Apple's MLX framework. Each trip is converted into a short text describing the traveller, the trip, and the four options with their times (to one decimal minute) and costs, and the model is asked to answer with one word (Appendix~\ref{app:prompt}). Instead of generating text, we read the model's scores for the first token of each answer word in a single forward pass and apply a softmax, which gives four probabilities per trip and no parsing step. The zero-shot model is used as is. The fine-tuned model is trained with low-rank adaptation \citep[LoRA;][]{hu2022lora} with rank 8 on the query, key, value and output projections of all 24 layers (1.08 million trainable parameters, 0.22\% of the model), with the loss applied only to the answer word, for one epoch. The learning rate was chosen among five values on a 2,000-trip run using validation log-loss only. To measure how much data fine-tuning needs, we repeated it with nested subsets of 500, 2,000 and 8,000 trips and fitted the logit and boosting models on the same subsets.
+
+\subsection{Evaluation metrics}
+Models are compared mainly by multiclass log-loss, a proper scoring rule that suits every model because all of them produce probabilities. We also report accuracy, macro-F1 and per-mode recall (important because cycling is rare), the expected calibration error (ECE) and the mode-share error, which is the mean absolute difference between the average predicted share and the observed share over the four modes. To compare with published work we give the geometric mean probability of correct assignment (GMPCA) used by \citet{martinbaos2023}, which is the geometric mean of the probabilities assigned to the chosen modes and equals $\exp(-\text{log-loss})$.
+
+\subsection{Behavioural analysis}
+The value of time is the ratio of a time coefficient to the cost coefficient, multiplied by 60 to give pounds per hour. For models without coefficients we define an implied value of time from probability responses: the change in a mode's probability per extra minute of its own travel time divided by the change per extra pound of its own cost, computed from perturbations of 15\% and 20\% and kept only for trips where both effects have the sign that theory requires. Arc elasticities and mode-share shifts are computed for five policy scenarios: public transport fares $-20\%$ (S1), driving costs $+20\%$ (S2), driving time $+15\%$ (S3), public transport in-vehicle time $-15\%$ (S4), and the combination of S1, S2 and S4 (S5). A monotonicity check records how often a model moves a mode's probability the wrong way when that mode's own cost or time changes.
+
+% ------------------------------------------------------------------ 4
+\section{Discrete choice results}
+\label{sec:dcm}
+
+\subsection{Multinomial Logit specification}
+Table~\ref{tab:ladder} shows the specification ladder. Each step improves the fit by far more than the likelihood-ratio test requires, and BIC is lowest for M4, which was therefore selected. Adding mode-specific times raises the pseudo-$R^2$ from 0.19 to 0.27, person variables to 0.39 and trip variables to 0.41.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath ladder.tex}
+\caption{Multinomial Logit specification ladder, estimated on the training years (54,766 trips). Walking is the reference mode. The likelihood-ratio statistic compares each model with the previous one.}
+\label{tab:ladder}
+\end{table}
+
+All time, interchange and cost coefficients are negative and highly significant (Appendix~\ref{app:coef}). Public transport access time is the most heavily penalised ($-0.096$ per minute), followed by interchange time ($-0.069$), car time ($-0.058$), bus time ($-0.051$) and rail time ($-0.040$); each interchange adds a further penalty of 0.18. Traffic variability strongly reduces the attractiveness of driving ($-2.6$). Among personal variables, car ownership is the dominant factor: relative to walking, having fewer than one car per adult raises the utility of driving by 2.0 and having one or more per adult by 2.5, while it lowers the utility of public transport by 0.5 and 0.7. Holding a licence raises driving utility by 0.9. Women are much less likely to cycle ($-0.81$) and somewhat more likely to use public transport ($+0.26$). Longer trips shift choice away from walking: the coefficient on log distance is 2.6 for public transport, 1.9 for car and 1.1 for cycling. Relative to commuting, the car is more attractive against walking for home-based other trips ($+0.66$), employer's business trips ($+1.06$) and non-home-based trips ($+0.75$), and about equal for education trips ($+0.17$).
+
+\subsection{Standard errors that respect repeated trips}
+Resampling whole households changes the precision of the coefficients. The median ratio of the household-bootstrap standard error to the robust standard error from the single fit is \bootRatioMedian{} (range \bootRatioMin{} to \bootRatioMax{} across the \nCoef{} coefficients). Of the \nCoef{} coefficients, \bootSigRobust{} are significant at the 5\% level by the robust standard error and \bootSigBoot{} have bootstrap percentile intervals that exclude zero. The substantive conclusions above do not depend on which standard error is used, but the model-based test statistics reported by a single fit are overconfident, and the bootstrap intervals are the ones we rely on. Appendix~\ref{app:coef} reports both standard errors for every coefficient.
+
+\subsection{Importance of variable groups}
+Removing a group of variables from M4 and testing the loss of fit shows that person characteristics matter most, followed by car service attributes, trip variables, public transport service and walking and cycling times (Table~\ref{tab:groups}, Figure~\ref{fig:groups}). In the boosting model, shuffling a group of variables raises validation log-loss in the same order, except that walking and cycling times rank above public transport service. The two methods agree that personal characteristics, above all car availability, drive mode choice. They differ in the ranking of the last two groups, partly because the logit group for public transport has five parameters and the group for walking and cycling two, and partly because boosting can recover public transport information from distance and the other variables.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath groups.tex}
+\caption{Importance of variable groups. Logit: loss of log-likelihood when the group is removed from M4 (training years). Boosting: increase in validation log-loss when the group is shuffled.}
+\label{tab:groups}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{\figpath f8_group_importance.png}
+\caption{Importance of variable groups in the logit and boosting models.}
+\label{fig:groups}
+\end{figure}
+
+\subsection{Nested Logit}
+The structure with the car alone against $\{$walk, cycle, public transport$\}$ is supported (Table~\ref{tab:nested}): the nest parameter is 1.31 ($t = 6.8$ against 1), the likelihood-ratio statistic against the Multinomial Logit is 66 with one degree of freedom, and the BIC falls from 73,432 to 73,377. In the other structure the nest of walking and cycling is not supported, because its parameter sits at the lower bound of 1, while the motorised nest has a parameter of 1.22 ($t = 4.6$). The data therefore suggest that the main substitution pattern is between the car and all other modes. This differs from the structure used in the published nested logit for the same dataset, which groups public transport and driving with $\mu = 1.35$ \citep{salvade2024}; in our estimates that grouping is supported only weakly once the car is separated. As with the Multinomial Logit, the nest tests rely on robust standard errors that ignore clustering by household; we did not bootstrap the nested model. With a $t$-statistic of 6.8 a moderate inflation would not change the conclusion, but the evidence for the second nest is weaker than for the first. Although Nested Logit fits significantly better, it does not predict better out of sample (Section~\ref{sec:pred}).
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath nested.tex}
+\caption{Nested Logit structures compared with the Multinomial Logit, estimated on the training years. Nest parameters are shown for the nests that are not singletons.}
+\label{tab:nested}
+\end{table}
+
+\subsection{Sensitivity of the cost coefficient}
+\label{sec:cost}
+With a single cost coefficient shared by public transport fares and driving costs we obtain $-0.091$ per pound. When we give the two their own coefficients, the driving cost coefficient is $-0.104$ but the public transport fare coefficient becomes $+0.102$, which has the wrong sign (Table~\ref{tab:cost}). The fit improves significantly, but the sign makes the specification behaviourally implausible. Fares are largely determined by distance and zones, a third are zero because of free passes, and \citet{martinbaos2023} report a related problem for this dataset: when the discounted fare is included together with variables describing fare discounts, the sign of the cost coefficient becomes unreliable in their logit model. In effect, the shared cost coefficient is identified from driving costs. We keep it because economic theory implies a single marginal utility of money, but every conclusion about fare changes depends on this assumption.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath costsens.tex}
+\caption{Cost coefficients with shared and separate public transport and car coefficients (selected specification, training years).}
+\label{tab:cost}
+\end{table}
+
+\subsection{Value of travel time}
+\label{sec:vot}
+Table~\ref{tab:vot} gives the value of time implied by the Multinomial Logit. The household bootstrap gives wider intervals than the delta method, as expected. The driving value of \gbp{}38 per hour (bootstrap interval \gbp{}\bootCarLo{} to \gbp{}\bootCarHi{}) is high compared with usual appraisal values for the UK, and we do not treat it as an estimate of willingness to pay. It agrees, however, with earlier results for this dataset: linear logit models have been reported to give about \gbp{}40 per hour for driving and \gbp{}8.73 for public transport \citep[as cited by][]{salvade2024}, and \citet{martinbaos2023} report median values of 41.6 for the car and 42.4 for public transport time (access time) from their logit model. The large spread across published specifications for public transport (from 8.73 to over 40) is consistent with our finding that the cost effect for public transport is not well identified. When public transport fares and driving costs have separate coefficients, our driving value falls to \gbp{}29. Within our estimates, the relative pattern is informative: access, egress and interchange time are valued far above in-vehicle time, rail time is valued less than bus time, and commuters have lower values than other travellers (Table~\ref{tab:votseg}).
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath vot.tex}
+\caption{Value of time implied by the Multinomial Logit (training years): point estimate, delta-method interval, and household-bootstrap interval (\bootN{} refits).}
+\label{tab:vot}
+\end{table}
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath votseg.tex}
+\caption{Value of time (\gbp{} per hour) by subsample, from separate refits of the selected specification. These point estimates are not accompanied by bootstrap intervals, and the delta-method intervals ignore clustering, so differences between columns should be read as indicative. Households without a car are omitted because the car cost coefficient is not identified there.}
+\label{tab:votseg}
+\end{table}
+
+% ------------------------------------------------------------------ 5
+\section{Predictive comparison}
+\label{sec:pred}
+
+\subsection{Overall performance}
+Table~\ref{tab:compare} compares all models on the shared 4,000-trip test sample, drawn from the later survey year. The reference predictor assigns every trip the training market shares.
+
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{\tabpath compare4000.tex}
+\caption{Test performance on the shared 4,000-trip sample (survey year 3). Intervals are household-level bootstrap intervals; the best trained model on each of the two main criteria is in bold. ECE: expected calibration error. Share error: mean absolute difference between predicted and observed mode shares. GMPCA: $\exp(-\text{log-loss})$.}
+\label{tab:compare}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.98\textwidth]{\figpath f2_model_comparison.png}
+\caption{Log-loss and accuracy of every model on the 4,000-trip test sample, with 95\% household-bootstrap intervals.}
+\label{fig:compare}
+\end{figure}
+
+On the full test set of 26,320 trips the classical models give the results in Table~\ref{tab:comparefull}, which reproduce the ranking and the levels of the sample closely.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath comparefull.tex}
+\caption{Test performance of the classical models on the full test set (26,320 trips).}
+\label{tab:comparefull}
+\end{table}
+
+Four findings stand out.
+
+\paragraph{All classical and machine-learning models predict similarly well.}
+Gradient boosting and the neural network are the best, with log-loss about 0.025 to 0.029 below that of the Multinomial Logit (Table~\ref{tab:paired}); they are statistically indistinguishable from each other. The random forest is not significantly better than the logit and is worse than boosting. The advantage of flexible models is real but modest, about one percentage point of accuracy. A logit model with 67 parameters already captures most of the predictable variation.
+
+\paragraph{Nested Logit does not improve prediction.} It fits the training data significantly better, but its out-of-sample log-loss is the same as that of the Multinomial Logit.
+
+\paragraph{The zero-shot language model fails.}
+Its log-loss of 2.64 is worse than that of the market-share reference (1.15), and its accuracy of 39\% is below the 42\% obtained by always predicting the car. It predicts only walking or car; recall for public transport is zero. Its scores depend heavily on the order in which the options appear in the prompt: on the validation trips, reversing the order changes the predicted mode for 74\% of trips. Adding one fixed correction per mode, fitted on validation trips, removes much of the error (log-loss 1.10), which shows that a large part of the failure is a wrong prior over modes, but the corrected model is still far from useful.
+
+\paragraph{Fine-tuning transforms the language model but does not close the gap.}
+After training on 8,000 trips the log-loss falls from 2.64 to 0.77 and accuracy rises from 39\% to 70\%. It remains worse than the Multinomial Logit by 0.080 and than gradient boosting by 0.105, and about 3 to 4 percentage points less accurate. Its probabilities are less well calibrated (ECE 0.069 against 0.02 to 0.03) and its mode-share error (0.018) is three times that of the logit model (Figure~\ref{fig:reliability}). The model also still depends on the order of the options: it was always trained with the options listed as walk, cycle, public transport, car, and when the order is reversed on the validation trips 33\% of its predictions change, log-loss rises from 0.72 to 1.00 and accuracy falls from 73\% to 56\%. Training with a randomised option order would probably reduce this dependence; we did not test that.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath paired.tex}
+\caption{Paired differences in log-loss on the 4,000-trip sample, with household-bootstrap 95\% intervals (negative: model A predicts better).}
+\label{tab:paired}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.98\textwidth]{\figpath f4_reliability.png}
+\caption{Reliability curves: observed frequency against predicted probability for each mode, in eight quantile bins. The zero-shot model is far from the diagonal; the fine-tuned model is close but noisier than the logit and boosting models.}
+\label{fig:reliability}
+\end{figure}
+
+\subsection{Performance by mode and by segment}
+All models do well on the three large modes and fail on cycling, which is 3\% of trips: recall for cycling is below 1\% for every model (Table~\ref{tab:recall}). Models rank similarly across segments, but difficulty varies sharply. Trips between 1 and 2.5 km are the hardest (gradient boosting accuracy 64\%, log-loss 0.88), because walking, public transport and car are all plausible there; trips over 10 km are the easiest (83\%, log-loss 0.40). Households with fewer than one car per adult are harder than those with no car or ample cars (71\% against 75\% and 76.5\%), again because the choice is genuinely open there. The fine-tuned language model loses most on long trips (over 10 km: log-loss 0.58 against 0.40 for boosting) and in households with an intermediate level of car ownership. Figure~\ref{fig:confusion} shows the confusion matrices.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath recall.tex}
+\caption{Recall by mode on the 4,000-trip sample.}
+\label{tab:recall}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.66\textwidth]{\figpath f5_confusion.png}
+\caption{Confusion matrices (row-normalised) on the 4,000-trip sample. Cycling is almost never predicted.}
+\label{fig:confusion}
+\end{figure}
+
+\subsection{How much data does each model need?}
+Figure~\ref{fig:sample} and Table~\ref{tab:sample} show test log-loss against the number of training trips, using nested subsets of the household-disjoint training pool; the largest point is the whole pool of 43,812 trips, which excludes the fold reserved for language-model validation.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath sample.tex}
+\caption{Test log-loss on the 4,000-trip sample by number of training trips. The zero-shot language model (no training) has log-loss 2.64.}
+\label{tab:sample}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\textwidth]{\figpath f3_sample_efficiency.png}
+\caption{Sample efficiency. MNL M2 is the logit without personal and trip variables.}
+\label{fig:sample}
+\end{figure}
+
+The fully specified logit model is remarkably data-efficient: with 500 trips it already achieves a log-loss of 0.80, and with 2,000 trips it reaches 0.70, within 0.02 of its value on the full pool. Gradient boosting matches it up to about 8,000 trips and pulls ahead only with the full data. A simpler logit (M2, without personal and trip variables) is limited to about 0.85 whatever the sample size, which shows that the personal and trip variables, not the amount of data, carry the extra predictive power. The fine-tuned language model improves steadily with data (1.12, 0.80, 0.77), but at 8,000 trips it is still behind the logit trained on 2,000 trips; its performance at 8,000 trips is roughly what the logit reaches with between 500 and 2,000 trips. The computation is also very different. Estimating the logit takes seconds and boosting seconds to minutes, whereas fine-tuning took 4 minutes for 500 trips, 17 minutes for 2,000 and 66 minutes for 8,000 on a laptop.
+
+\subsection{Comparison with published results}
+\label{sec:literature}
+Table~\ref{tab:lit} compares our results with published work on the same dataset. All published figures were checked against the original papers (Appendix~\ref{app:lit}).
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{4.1cm}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X}
+\toprule
+Quantity & Published & This project (full test set) \\
+\midrule
+Design & Train on survey years 1--2, test on a later period, household-grouped validation \citep{martinbaos2023,salvade2024} & Same \\
+Accuracy, Multinomial Logit & 72.54\% \citep{martinbaos2023} & 73.8\% \\
+Accuracy, boosted trees & 74.72\% (XGBoost; \citealt{martinbaos2023}) & 74.6\% \\
+Accuracy, neural network & 74.25\% (one hidden layer), 74.05\% (deep) & 74.6\% \\
+Cross-entropy, Multinomial Logit & 0.7085 \citep{salvade2024} & 0.684 \\
+Cross-entropy, Nested Logit & 0.7091 (no gain over MNL) & 0.683 (no gain over MNL) \\
+Cross-entropy, boosted trees & 0.6537 (LightGBM) & 0.657 \\
+Cross-entropy, neural networks & 0.6667, 0.6735 & 0.657 \\
+GMPCA, boosted trees & 51.85\% (XGBoost) & 51.8\% \\
+Value of time, car, linear logit & about \gbp{}40 per hour \citep[cited by][]{salvade2024}; 41.6 \citep{martinbaos2023} & \gbp{}38 per hour \\
+Value of time, flexible models & Inconsistent for random forest and XGBoost, with 41--43\% invalid values \citep{martinbaos2023} & Right signs on fewer than half of eligible trips for boosting \\
+\bottomrule
+\end{tabularx}
+\caption{Published results on LPMC compared with this project. Cross-entropy values are on the held-out later period. The value-of-time figure of \citet{martinbaos2023} uses public transport access time and the units are not stated in the paper.}
+\label{tab:lit}
+\end{table}
+
+Our boosting model and neural network are on par with the best published tree and network models, and our Multinomial Logit is better than the published logit models. A controlled test on the training years is consistent with the reason being a richer specification: removing the fare-type and bus-scale variables costs only 0.0015 in validation log-loss, while removing the trip variables (purpose, log distance, peak and weekend) costs about 0.03 (Table~\ref{tab:ablation}). We cannot confirm from the published descriptions which variables their logit models contained, so this explanation remains an inference. Published nested logit results also show no out-of-sample gain over the logit, as in our results. The behavioural findings agree with those of \citet{martinbaos2023}, who found that the most accurate flexible models (random forest and XGBoost) give inconsistent values of time while the Multinomial Logit is robust.
+
+The published studies of language models on this dataset are not directly comparable with ours. \citet{zhai2024} report that prompting LLaMA3 with similar examples reaches 76.8\% to 77.2\% accuracy against 69.0\% for a logit model, but they do not state how the data were split or the size of the models, and they report hard labels (accuracy, F1, kappa) and not probabilities. \citet{alsaleh2025} fine-tuned a 12-billion-parameter model, but on the Swissmetro dataset and not on LPMC, evaluated on 200 observations; on LPMC they tested only untuned models of 1 to 12 billion parameters, whose best weighted F1 scores were 0.576 (zero-shot), 0.661 (random few-shot) and 0.639 (targeted few-shot). Our fine-tuned model is much smaller (0.5 billion parameters), is evaluated on a larger test sample with a leakage-free split, and is judged by probabilities.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath ablation.tex}
+\caption{Ablation of the Multinomial Logit specification, trained on four training folds and scored on the fifth (training years only). Fare variables: fare type and bus scale.}
+\label{tab:ablation}
+\end{table}
+
+% ------------------------------------------------------------------ 6
+\section{Behavioural analysis and policy scenarios}
+\label{sec:behaviour}
+
+\subsection{Implied value of time for models without coefficients}
+For the logit models the implied value of time reproduces the coefficient ratio (Table~\ref{tab:implied}; Figure~\ref{fig:vot}). For gradient boosting and the fine-tuned language model, fewer than half of the eligible trips respond in the right direction to both time and cost, and the interquartile ranges span an order of magnitude. This agrees with the published finding that flexible machine-learning models give inconsistent values of time while the logit is robust.
+
+\begin{table}[H]
+\centering\footnotesize
+\input{\tabpath implied.tex}
+\caption{Implied value of time (\gbp{} per hour) from probability responses on the 1,000-trip scenario sample. IQR: interquartile range. Right signs / eligible: trips for which probability falls with both time and cost, out of the trips with enough cost and time to be eligible.}
+\label{tab:implied}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.98\textwidth]{\figpath f6_value_of_time.png}
+\caption{Value of time. Left: Multinomial Logit coefficients with household-bootstrap intervals. Right: implied values from probability responses, median and interquartile range.}
+\label{fig:vot}
+\end{figure}
+
+\subsection{Elasticities}
+Table~\ref{tab:elast} reports arc elasticities of the affected mode's aggregate share for the four single-variable scenarios. Time elasticities are moderate and consistent between the two logit models: a 15\% increase in driving time lowers the car share by about 4\% in relative terms. Cost elasticities are very small ($-0.03$ for driving cost, $-0.05$ for public transport fare), because the cost coefficient is small; their size reflects the shared-cost assumption (Section~\ref{sec:cost}) and is not independent evidence about fares. Gradient boosting responds to driving time with about three quarters of the logit's strength and to public transport time with about a third, and its response to driving cost is zero or slightly of the wrong sign. The fine-tuned language model responds weakly to everything except driving time, and the zero-shot model has essentially no response, or one of the wrong sign.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath elast.tex}
+\caption{Arc elasticities of aggregate mode shares on the 1,000-trip scenario sample. The affected mode is public transport for S1 and S4 and the car for S2 and S3. A negative own-elasticity is the expected sign.}
+\label{tab:elast}
+\end{table}
+
+\subsection{Policy scenarios}
+Table~\ref{tab:scen} reports the change in the shares of public transport and car for the five scenarios on the 1,000-trip scenario sample; baseline shares in this sample are 17.5\% walk, 2.9\% cycle, 35.5\% public transport and 44.1\% car.
+
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\input{\tabpath scen.tex}
+\caption{Change in mode share in percentage points with household-bootstrap 95\% intervals. Walking and cycling shifts and the zero-shot model are in the accompanying files.}
+\label{tab:scen}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{\figpath f7_policy_scenarios.png}
+\caption{Mode-share shifts (percentage points) under the five scenarios, by model, with 95\% household-bootstrap intervals.}
+\label{fig:scen}
+\end{figure}
+
+According to the logit models, time-based interventions have larger effects than price-based ones in these simulations: slower driving ($+15\%$) moves 1.8 to 1.9 points of trips from the car, mostly to public transport, while a 20\% rise in driving cost moves only 0.3. Faster public transport ($-15\%$ in-vehicle time) moves 1.2 points from the car, and the combined package moves about 2 points of trips onto public transport. The comparison depends on how well each coefficient is estimated: cost coefficients are weakly identified in this dataset and modelled costs are likely to be measured with error, which biases the cost coefficient towards zero. The finding that time matters more than money should therefore be read as a statement about these estimates, not as a general result about travellers in London. Gradient boosting predicts the same direction for time changes with about half the effect, and for a rise in driving cost it predicts no fall in the car share (+0.06 points, interval $-0.01$ to $+0.13$), which is behaviourally implausible. The fine-tuned language model reproduces the sign of the effect of driving time, with a smaller size, and responds weakly to everything else. The zero-shot model moves the wrong way in several scenarios; for example, in the package the car share rises by 0.28 points.
+
+Table~\ref{tab:mono} makes the inconsistency explicit by giving the share of trips for which a model moves a mode's probability in the wrong direction. By construction the logit models never respond the wrong way. Gradient boosting does so for 35\% of trips when driving costs rise, and the fine-tuned language model for 21\% to 32\% of trips in every scenario. Better prediction does not imply a reliable response to counterfactuals: a model that has not learned the structure of price and time effects should not be used to test policies.
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath mono.tex}
+\caption{Share of trips whose probability moves in the wrong direction for the mode whose cost or time was changed (1,000-trip scenario sample).}
+\label{tab:mono}
+\end{table}
+
+% ------------------------------------------------------------------ 7
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{What each model family offers.}
+The Multinomial Logit gives interpretable coefficients, a value of time, consistent responses to policy changes, and good prediction from few data. Nested Logit refines the picture of substitution, with the car as a distinct alternative, without changing prediction. Gradient boosting and a neural network add about one point of accuracy and 0.025 in log-loss by finding non-linearities, but their policy responses are not trustworthy and they provide no behavioural parameters. The language model learns from examples to a reasonable degree, but at the scale we could run it is a poorer predictor than every classical model, needs thousands of training trips and about an hour of laptop training, is less well calibrated, and responds weakly or incorrectly to counterfactual changes.
+
+\paragraph{What the language-model results do and do not show.}
+They show that a 0.5-billion-parameter model has no useful prior about mode choice, that fine-tuning on a few thousand trips teaches it a good deal (log-loss falls by 1.9), and that it still lags the logit model, which has a much stronger inductive bias for numeric attributes. They do not show that larger language models would behave the same way. The learning-rate sweep ended at the lowest value we tried (Appendix~\ref{app:settings}), so the fine-tuned result may be slightly pessimistic, and the model was trained with a single ordering of the options and is sensitive to it.
+
+\paragraph{Implications for planning.}
+Within the limits of the data, four points follow. First, access to a car dominates mode choice: relative to walking, owning enough cars for the adults in the household raises the utility of driving by 2.5, equivalent to about 43 minutes of extra driving time, so policies that act on trip times alone will have limited effect on car-owning households. Second, within our estimates time attributes matter more than money: access time, interchanges and traffic variability are heavily penalised, so reliability and ease of interchange, not only speed, are levers worth studying. Third, slowing driving or speeding up public transport shifts about one to two percentage points of trips in the logit simulations; these are the better-supported conclusions. Fourth, we do not consider the fare results reliable, because fares cannot be separated from distance in this dataset.
+
+\paragraph{Limitations.}
+\begin{itemize}
+\item Times and costs of all four modes are modelled by a journey planner and a cost model and not observed; income, education and occupation are absent, and fare type and car ownership are weak proxies.
+\item Without survey weights, results describe the sample and not the population of London.
+\item The car mode includes passengers, and no model predicts cycling.
+\item Standard errors from a single logit fit ignore repeated trips by the same person; we used a household bootstrap for the selected Multinomial Logit but not for the Nested Logit or for the segment-specific value-of-time estimates.
+\item The language-model comparison uses a 0.5-billion-parameter model, a 4,000-trip test sample, a learning-rate grid whose optimum lies at its lower edge, and a single option order.
+\item Scenario results for the machine-learning and language models rely on the models extrapolating to inputs changed by 15\% to 20\%.
+\item During development, test results were printed once in a smoke test of the logit models. No choice of model or setting was based on them, but we report it for completeness.
+\end{itemize}
+
+% ------------------------------------------------------------------ 8
+\section{Conclusions}
+\label{sec:conclusions}
+
+We modelled the choice among walking, cycling, public transport and car for 81,086 London trips, using logit models, machine learning and a small language model, estimated on the first two survey years and tested on the third. The conclusions are organised by the questions posed in the introduction.
+
+\paragraph{Which factors explain mode choice?}
+Personal characteristics, and above all car availability, matter most. Relative to walking, having enough cars for the adults in the household raises the utility of driving by 2.5, and holding a driving licence adds 0.9. Distance shifts choice from walking to motorised modes, and trip purpose matters mainly for the car. Among service attributes, public transport access time, interchanges and traffic variability on the driving route are penalised most heavily; walking and cycling times matter least in the logit model (in the boosting model, public transport service ranks last). The coefficients behind these statements remain significant under household-clustered standard errors.
+
+\paragraph{How well can mode choice be predicted, and by which model?}
+On a held-out later year, a well-specified Multinomial Logit reaches 73.8\% accuracy and a log-loss of 0.684 on the full test set. Gradient boosting and a neural network are better by 0.025 to 0.029 in log-loss (74.6\% accuracy), a modest but statistically reliable gain that agrees with published benchmarks for this dataset. Nested Logit shows that the car is a distinct alternative but does not improve prediction. Cycling, at 3\% of trips, is not predicted by any model.
+
+\paragraph{What do travellers value?}
+The logit models imply a value of time of about \gbp{}38 per hour for driving and \gbp{}27 to \gbp{}34 per hour for in-vehicle public transport time, with access, egress and interchange time valued more highly. These values are higher than usual appraisal values and should be read as relative magnitudes. They are consistent with earlier results for this dataset. Fare effects cannot be identified: with separate coefficients, the public transport fare coefficient has the wrong sign.
+
+\paragraph{How do mode shares respond to policy?}
+Under the logit models, a 15\% increase in driving time moves about 1.8 percentage points of trips from the car, mostly to public transport, and a 15\% reduction in public transport in-vehicle time moves about 1.2 points; a 20\% increase in driving cost moves only 0.3 points. These results depend on cost coefficients that are weakly identified. Gradient boosting and the language models do not respond consistently: gradient boosting moves the wrong way for 35\% of trips when driving costs rise.
+
+\paragraph{Can a small language model learn mode choice?}
+Zero-shot, a 0.5-billion-parameter model is worse than guessing the market shares. Fine-tuning on 8,000 trips raises accuracy from 39\% to 70\% and lowers log-loss from 2.64 to 0.77, which shows that it learns real structure from examples, but it stays behind every classical model, is less well calibrated, needs far more data and time, and does not respond sensibly to price and time changes. Claims in the literature that language models beat classical models rest on larger models and, in the case we examined, on unreported data splits; our results do not contradict them but do not support them at this scale.
+
+\paragraph{Recommendations.}
+Use logit models for behavioural analysis and scenario testing, because they give interpretable parameters and consistent responses. Use machine-learning models where prediction is the only goal and counterfactual behaviour is not needed. Validate every model on a later period and group trips by household. Treat any fare-based conclusion from this dataset with caution.
+
+\paragraph{Directions for further work.}
+Monotonicity constraints on boosting, as proposed by \citet{salvade2024}, would make its responses consistent with theory. Larger language models and randomised option order during fine-tuning would test whether the gap we found is one of scale. Estimating the cost effect with income-related variables, or with a dataset that has observed costs, would address the main identification problem. Finally, repeating the analysis on a dataset from an Indian city with the six modes described in the brief would test how far the findings carry over.
+
+% ------------------------------------------------------------------ references
+\begin{thebibliography}{99}
+\setlength{\itemsep}{0.2em}
+
+\bibitem[Alsaleh and Farooq(2025)]{alsaleh2025}
+Alsaleh, T. and Farooq, B. (2025).
+\newblock Towards locally deployable fine-tuned causal large language models for mode choice behaviour.
+\newblock \emph{arXiv preprint} arXiv:2507.21432.
+
+\bibitem[Bierlaire(2023)]{bierlaire2023}
+Bierlaire, M. (2023).
+\newblock A short introduction to Biogeme.
+\newblock Technical report TRANSP-OR 230620, Transport and Mobility Laboratory, EPFL.
+
+\bibitem[Hillel et al.(2018)]{hillel2018}
+Hillel, T., Elshafie, M.~Z. E.~B. and Jin, Y. (2018).
+\newblock Recreating passenger mode choice-sets for transport simulation: a case study of London, UK.
+\newblock \emph{Proceedings of the Institution of Civil Engineers: Smart Infrastructure and Construction}, 171(1):29--42.
+
+\bibitem[Hillel et al.(2021)]{hillel2021}
+Hillel, T., Bierlaire, M., Elshafie, M.~Z. E.~B. and Jin, Y. (2021).
+\newblock A systematic review of machine learning classification methodologies for modelling passenger mode choice.
+\newblock \emph{Journal of Choice Modelling}, 38:100221.
+
+\bibitem[Hu et al.(2022)]{hu2022lora}
+Hu, E.~J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L. and Chen, W. (2022).
+\newblock LoRA: low-rank adaptation of large language models.
+\newblock In \emph{International Conference on Learning Representations}.
+
+\bibitem[Mart{\'\i}n-Baos et al.(2023)]{martinbaos2023}
+Mart{\'\i}n-Baos, J.~A., L{\'o}pez-G{\'o}mez, J.~A., Rodriguez-Benitez, L., Hillel, T. and Garc{\'\i}a-R{\'o}denas, R. (2023).
+\newblock A prediction and behavioural analysis of machine learning methods for modelling travel mode choice.
+\newblock \emph{Transportation Research Part C: Emerging Technologies}, 156:104318.
+
+\bibitem[Salvad{\'e} and Hillel(2024)]{salvade2024}
+Salvad{\'e}, N. and Hillel, T. (2024).
+\newblock RUMBoost: gradient boosted random utility models.
+\newblock \emph{arXiv preprint} arXiv:2401.11954.
+
+\bibitem[Zhai et al.(2024)]{zhai2024}
+Zhai, X., Tian, H., Li, L. and Zhao, T. (2024).
+\newblock Enhancing travel choice modeling with large language models: a prompt-learning approach.
+\newblock \emph{arXiv preprint} arXiv:2406.13558.
+
+\end{thebibliography}
+
+% ------------------------------------------------------------------ appendices
+\appendix
+\section{Prompt template for the language model}
+\label{app:prompt}
+The following prompt is used for every trip; the text in square brackets is not part of the prompt. The model's scores for the first tokens of ``walk'', ``cycle'', ``public'' and ``drive'' at the answer position are converted to probabilities with a softmax.
+\begin{quote}\small\ttfamily
+System: You predict how travellers in London choose their travel mode.\\[0.3em]
+User: Traveller: a 56-year-old female, holds a driving licence, lives with at least one car per adult in the household, fare status: full fare, they pay full price on buses.\\
+Trip: a home-based trip (shopping, leisure, errands), 0.8 km straight-line distance, on Sunday at 10:00.\\
+Options (door-to-door):\\
+- walk: 13.1 min\\
+- cycle: 5.5 min\\
+- public transport: 9.1 min in total (8.1 min walking to and from stops, 0.0 min on rail, 1.0 min on bus, 0.0 min changing), 0 change(s), fare \pounds1.50\\
+- drive: 3.1 min, fuel \pounds0.14, congestion charge \pounds0.00, traffic variability 11\%\\
+Which mode does the traveller choose? Answer with one word: walk, cycle, public or drive.\\[0.3em]
+Assistant: [answer]
+\end{quote}
+
+\section{Model settings}
+\label{app:settings}
+\begin{itemize}
+\item \textbf{Gradient boosting:} learning rate 0.05, at most 15 leaves per tree, at least 50 samples per leaf, L2 penalty 10, 159 trees; selected from 10 random settings by validation log-loss on two household-grouped folds. Five-fold grouped cross-validation log-loss on the training years: 0.641.
+\item \textbf{Random forest:} 500 trees, minimum leaf size 5, square-root feature sampling, chosen on one household-grouped fold.
+\item \textbf{Neural network:} two hidden layers of 128 and 64 units, L2 penalty 0.001, Adam optimiser, early stopping, five seeds averaged.
+\item \textbf{Language model:} Qwen2.5-0.5B-Instruct in bf16 precision; LoRA rank 8, scale 20, no dropout, applied to the query, key, value and output projections of all 24 layers; batch size 4; maximum sequence length 320; one epoch; loss on the answer word only; seed 42. The learning-rate sweep on the 2,000-trip run is in Table~\ref{tab:lrsweep}; 1e-5 was used for all final runs. The best value lies at the lower edge of the grid.
+\item \textbf{Software:} Python 3.12, Biogeme 3.3.5, scikit-learn 1.9, MLX 0.32 and mlx-lm 0.32. Random seed 42 throughout.
+\end{itemize}
+
+\begin{table}[H]
+\centering\small
+\input{\tabpath lrsweep.tex}
+\caption{Learning-rate sweep for fine-tuning on 2,000 trips, evaluated on the 1,000 validation trips (no test data).}
+\label{tab:lrsweep}
+\end{table}
+
+\section{Complete Multinomial Logit coefficients}
+\label{app:coef}
+Estimates for the selected specification (M4), with the robust standard error from the single fit and the standard error from \bootN{} household-bootstrap refits. The ratio is the bootstrap standard error divided by the robust standard error. A coefficient is marked significant if its bootstrap 95\% percentile interval excludes zero. Suffixes denote the mode (cycle, pt, drive); walking is the reference.
+{\small
+\IfFileExists{\tabpath coefs.tex}{\input{\tabpath coefs.tex}}{}
+}
+
+\section{Verification of published figures}
+\label{app:lit}
+Every published figure cited in this report was checked against the text of the original paper.
+\begin{itemize}
+\item \citet{martinbaos2023}: split by survey year (testing on 2014/15, training on 2012/13 to 2013/14, responses of the same individual used exclusively in the training or test set; Section 4.1.1); test accuracy and GMPCA for LPMC (Table 8: MNL 72.54 and 48.85, XGBoost 74.72 and 51.85, neural network 74.25 and 51.03, deep network 74.05 and 51.16); definition of GMPCA (Equation 26); values of time (Section 5.4, Table 11: MNL 42.39 for public transport access time and 41.62 for the car); shares of invalid values for LPMC (40.57\% for the random forest and 42.92\% for XGBoost); remark on the discounted fare variable (Section 5.4).
+\item \citet{salvade2024}: logit with 62 parameters; training on the first two years with household-grouped five-fold cross-validation (Section 3.1); cross-entropy on the holdout set (Table 4: MNL 0.7085, neural network 0.6667, deep network 0.6735, LightGBM 0.6537; Table 6: Nested Logit 0.7091); Nested Logit with PT and driving in one nest and $\mu=1.35$ (Section 4.2), and no improvement over the logit out of sample; values of time from linear models of 8.73 and 40 pounds per hour, attributed to Hillel's 2019 thesis, page 133 (Section 3.5; we did not consult the thesis).
+\item \citet{zhai2024}: Table II (accuracy: logit 0.690, logit with panel demonstrations 0.712, LLaMA3 zero-shot 0.576, similar demonstrations 0.768, panel demonstrations 0.772); no description of the train--test split, and no model sizes (models run through Ollama).
+\item \citet{alsaleh2025}: eleven open models of 1 to 12 billion parameters; fine-tuning of Gemma~3 12B on Swissmetro, weighted F1 0.6845; test sample of 200 observations; LPMC results for untuned models (zero-shot 0.576, random few-shot 0.661, targeted few-shot 0.639).
+\item \citet{hillel2021}: review of 70 articles (73 primary studies, from 574 unique records) identifying ten common methodological limitations, five of them pitfalls likely to bias performance estimates, among them data leakage in validation.
+\end{itemize}
+
+\end{document}

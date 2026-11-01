@@ -1,0 +1,15 @@
+\begin{tabular}{llrc}
+\toprule
+Model A & Model B & A $-$ B & 95\% CI \\
+\midrule
+Gradient boosting & Multinomial Logit & $-$0.025 & [$-$0.035, $-$0.015] \\
+Neural net (MLP) & Multinomial Logit & $-$0.029 & [$-$0.040, $-$0.018] \\
+Random forest & Multinomial Logit & $-$0.007 & [$-$0.018, 0.004] \\
+Nested Logit & Multinomial Logit & $-$0.001 & [$-$0.002, 0.001] \\
+Gradient boosting & Neural net (MLP) & 0.004 & [$-$0.004, 0.012] \\
+Gradient boosting & Random forest & $-$0.018 & [$-$0.025, $-$0.010] \\
+Qwen 0.5B fine-tuned (8,000 trips) & Qwen 0.5B zero-shot & $-$1.868 & [$-$1.957, $-$1.781] \\
+Qwen 0.5B fine-tuned (8,000 trips) & Multinomial Logit & 0.080 & [0.065, 0.096] \\
+Qwen 0.5B fine-tuned (8,000 trips) & Gradient boosting & 0.105 & [0.091, 0.121] \\
+\bottomrule
+\end{tabular}

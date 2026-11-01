@@ -1,0 +1,10 @@
+\begin{tabular}{lrrr}
+\toprule
+MNL variant & Parameters & Validation log-loss & Validation accuracy \\
+\midrule
+full M4 & 67 & 0.6620 & 75.3\% \\
+without fare-type / bus-scale (free-pass) variables & 52 & 0.6635 & 75.3\% \\
+without fare variables, age squared, peak, weekend & 43 & 0.6701 & 74.6\% \\
+without fare variables and trip variables & 31 & 0.6907 & 74.2\% \\
+\bottomrule
+\end{tabular}
