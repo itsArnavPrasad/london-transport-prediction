@@ -79,10 +79,13 @@ def nests(kind: str):
     return NestsForNestedLogit(choice_set=[1, 2, 3, 4], tuple_of_nests=ns)
 
 
-def fit(U, x: pd.DataFrame, nest=None, name="model"):
+def fit(U, x: pd.DataFrame, nest=None, name="model", start: dict | None = None):
+    """Estimate by maximum likelihood. `start` = optional starting values (used to warm-start bootstrap refits)."""
     lp = lognested(U, None, nest, Variable("choice")) if nest else loglogit(U, None, Variable("choice"))
     m = BIOGEME(db.Database(name, x), lp, generate_html=False, generate_yaml=False, save_iterations=False)
     m.model_name = name
+    if start:
+        m.change_init_values(start)
     return m.estimate()
 
 
