@@ -1,0 +1,2 @@
+model,logloss,logloss_reversed,accuracy,accuracy_reversed,mean_abs_dP,pct_predictions_changed
+fine-tuned,0.7217738712360144,1.00060292374639,0.73,0.56,0.16813667,33.0

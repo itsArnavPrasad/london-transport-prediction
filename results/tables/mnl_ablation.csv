@@ -1,0 +1,5 @@
+variant,params,val_logloss,val_accuracy
+full M4,67,0.6620343482082052,0.7529669527113383
+without fare-type / bus-scale (free-pass) variables,52,0.6634680444239783,0.753240825269308
+"without fare variables, age squared, peak, weekend",43,0.6701144823826145,0.7463940113200658
+without fare variables and trip variables,31,0.6906556747723526,0.741738177834581

@@ -1,0 +1,8 @@
+model,cfg,val_logloss
+rf,"{""min_samples_leaf"": 5, ""max_features"": ""sqrt""}",0.6560792615622304
+rf,"{""min_samples_leaf"": 20, ""max_features"": ""sqrt""}",0.6594238987759131
+rf,"{""min_samples_leaf"": 5, ""max_features"": 0.5}",0.6616165662096499
+rf,"{""min_samples_leaf"": 20, ""max_features"": 0.5}",0.6564404394555363
+mlp,"{""hidden_layer_sizes"": [64, 64], ""alpha"": 0.001}",0.6523088332875279
+mlp,"{""hidden_layer_sizes"": [128, 64], ""alpha"": 0.001}",0.6447385406382412
+mlp,"{""hidden_layer_sizes"": [64, 64], ""alpha"": 0.01}",0.6510999515678679

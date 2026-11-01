@@ -1,0 +1,1 @@
+{"tag": "n8000_lr1e-05", "lr": 1e-05, "selected_on": "validation log-loss of 2,000-trip runs: 2e-4 1.299, 1e-4 1.041, 5e-5 0.919, 2e-5 0.811, 1e-5 0.764 (lower edge of the grid reached)"}

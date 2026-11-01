@@ -1,0 +1,19 @@
+{
+ "params": {
+  "learning_rate": 0.05,
+  "max_leaf_nodes": 15,
+  "min_samples_leaf": 50,
+  "l2_regularization": 10.0
+ },
+ "n_iter": 159,
+ "T": 1.006633065680871,
+ "use_T": false,
+ "cv": {
+  "logloss": 0.6407665856174937,
+  "accuracy": 0.7561808421283278,
+  "macro_f1": 0.5612572163977325,
+  "brier": 0.35091041208810986,
+  "ece": 0.004156788635106244,
+  "share_err": 0.0007416606983745898
+ }
+}
